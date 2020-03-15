@@ -4,12 +4,20 @@ import (
 	"copaka/iface"
 	"fmt"
 	"net"
+	"time"
 )
 
 type Server struct{
 	Ip string
 	Port int
 	Name string
+}
+
+func ClientHandel(conn net.Conn,buf []byte,i int)error{
+	if _,err := conn.Write(buf[:i]);err != nil{
+		return err
+	}
+	return nil
 }
 
 func NewServer(name,ip string,port int)iface.Iserver{
@@ -64,5 +72,7 @@ func (p *Server)Stop(){
 }
 
 func (p *Server)Serve(){
+	go p.Start()
 
+	time.Sleep(20*time.Second)
 }
