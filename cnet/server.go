@@ -5,37 +5,34 @@ import (
 	"fmt"
 	"net"
 	"time"
+	"copaka/utils"
 )
 
 type Server struct{
-	Ip string
+	IP string
 	Port int
 	Name string
+	Routers iface.IRoutersHandle
 }
 
-func ClientHandel(conn net.Conn,buf []byte,i int)error{
-	if _,err := conn.Write(buf[:i]);err != nil{
-		return err
-	}
-	return nil
-}
-
-func NewServer(name,ip string,port int)iface.Iserver{
-	return &Server{Name:name,
-					Port:port,
-						Ip:ip}
+func NewServer()iface.Iserver{
+	utils.InitConfig()
+	return &Server{Name:utils.Globalogobject.Name,
+		           Port:utils.Globalogobject.Port,
+		           IP:utils.Globalogobject.Host,
+		           Routers:nil}
 }
 
 func (p *Server)Start(){
-	fmt.Printf("[START]server,listen at IP: %s,Port %d ,is starting\n",p.Ip,p.Port)
-
+	fmt.Printf("[START]server,listen at IP: %s,Port %d ,is starting\n",p.IP,p.Port)
+	fmt.Println(p.Port,p.Name,p.IP)
 	//监听服务器
-	listener,err := net.Listen("tcp",fmt.Sprintf("%s:%d",p.Ip,p.Port))
+	listener,err := net.Listen("tcp",fmt.Sprintf("%s:%d",p.IP,p.Port))
 	if err != nil{
 		fmt.Printf("[ERROR]Monitoring failed :%s\n",err)
 		return
 	}
-
+	var AutoID uint32
 	//监听成功
 	fmt.Printf("start copaka server,%s,now listening",p.Name)
 
@@ -48,21 +45,9 @@ func (p *Server)Start(){
 		}
 
 	//简单数据回显业务
-		go func() {
-			for  {
-				buf := make([]byte,512)
-				n,err := conn.Read(buf)
-				if err != nil{
-					fmt.Println("recv buf err",err)
-					continue
-				}
-				if _,err := conn.Write(buf[:n]); err != nil{
-					fmt.Println("write buf err",err)
-					continue
-				}
-			}
-		}()
-
+		connectioner := NewConnection(conn,AutoID,p.Routers)
+		go connectioner.Start()
+		AutoID += 1
 	}
 
 }
@@ -75,4 +60,8 @@ func (p *Server)Serve(){
 	go p.Start()
 
 	time.Sleep(20*time.Second)
+}
+
+func (p *Server)AddRouter(msgid uint32,router iface.IRouter){
+	p.Routers.AddRouter(msgid,router)
 }

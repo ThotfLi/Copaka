@@ -9,4 +9,6 @@ type Iserver interface {
 	Stop()
 	//开启服务器业务
 	Serve()
+	//路由功能
+	AddRouter(msgid uint32,router IRouter)
 }

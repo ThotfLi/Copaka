@@ -2,7 +2,10 @@ package cnet
 
 import (
 	"copaka/iface"
+	"copaka/utils"
 	"fmt"
+	"github.com/pkg/errors"
+	"io"
 	"net"
 )
 
@@ -13,18 +16,22 @@ type Connection struct{
 	ConnID   uint32
 	//当前连接状态是否已关闭
 	isClosed bool
-	//该链接的处理API
-	handleAPI iface.HandFunc
+
 	//告知该链接已经退出/停止的channel
 	ExitBuffChan chan bool
+
+	//路由
+	Routers iface.IRoutersHandle
+	msgChan chan []byte
 }
 
-func NewConnection(conn net.Conn,id uint32,callback iface.HandFunc)iface.IConnection{
+func NewConnection(conn net.Conn,id uint32,routers iface.IRoutersHandle)iface.IConnection{
 	return &Connection{Conn:conn,
-						ConnID:id,
-							isClosed:false,
-								ExitBuffChan:make(chan bool,1),
-									handleAPI:callback}
+		               ConnID:id,
+		               isClosed:false,
+		               ExitBuffChan:make(chan bool,1),
+		               Routers:routers,
+		               msgChan:make(chan []byte)}
 }
 
 func(p *Connection)GetConn()net.Conn{
@@ -36,24 +43,61 @@ func(p *Connection)StartReader(){
 	defer fmt.Println("exit reader conn is ",p.Conn.RemoteAddr().String())
 	defer p.Stop()
 
+	pack := NewPack()
 	for {
-		buf := make([]byte,512)
-		cnt,err := p.Conn.Read(buf)
+		headlen := make([]byte,pack.GetHeadLen())
+		_,err := io.ReadFull(p.Conn,headlen)
 		if err != nil{
 			fmt.Println("recv buf err ",err)
 			p.ExitBuffChan <- true
+			break
 		}
-
-		if err := p.handleAPI(p.Conn,buf,cnt); err != nil{
-			fmt.Println("connID",p.ConnID,"handle is err",err)
+		msg,err := pack.UnPack(headlen)
+		if err != nil {
+			fmt.Println("message err ",err)
+			break
+		}
+		data := make([]byte,msg.GetDataLen())
+		_,err = io.ReadFull(p.Conn,data)
+		if err != nil {
+			fmt.Println("message err",err)
 			p.ExitBuffChan <- true
+			break
+		}
+		msg.SetData(data)
+
+
+		//msg := NewMessages(buf[:cnt],1)
+
+		req := NewRequest(p,msg)
+
+		//不强制使用任务池
+		if utils.Globalogobject.WorkerPoolSize >0 {
+			go p.Routers.SendMsgToTaskQueue(req)
+		}else {
+			go p.Routers.RouterConverter(req)
 		}
 
+
+
+	}
+}
+
+func(p *Connection)StartWriter(){
+	fmt.Println("[START]Writer goroutine is running")
+	select {
+	case data := <- p.msgChan:
+		if _,err := p.Conn.Write(data);err != nil{
+			fmt.Println("[ERROR] Writer Msg Err:",err)
+		}
+	case <-p.ExitBuffChan:
+		return
 	}
 }
 
 func(p *Connection)Start(){
 	go p.StartReader()
+	go p.StartWriter()
 
 	for {
 		select {
@@ -84,3 +128,17 @@ func(p *Connection)GetConnID()uint32{
 	return p.ConnID
 }
 
+func(p *Connection)SendMsg(id uint32,data []byte)error{
+	if p.isClosed == true{
+		return errors.New("Connection closed when send msg")
+	}
+
+	dp := NewPack()
+	msgByte,err :=dp.Pack(NewMessages(data,id))
+	if err != nil {
+		fmt.Println("Pack error msg id = ",id)
+		return errors.New("Pack eror msg")
+	}
+	p.msgChan <- msgByte
+	return nil
+}
